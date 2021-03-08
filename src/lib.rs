@@ -1,29 +1,54 @@
 #![cfg_attr(not(test), no_std)]
 
+/// A CPIO file (newc format) reader.
+///
+/// # Example
+///
+/// ```rust,should_panic
+/// use cpio::CpioNewcReader;
+///
+/// let reader = CpioNewcReader::new(&[]);
+/// for obj in reader {
+///     println!("{}", obj.unwrap().name);    
+/// }
+/// ```
 pub struct CpioNewcReader<'a> {
     buf: &'a [u8],
 }
 
 impl<'a> CpioNewcReader<'a> {
+    /// Creates a new CPIO reader on the buffer.
     pub fn new(buf: &'a [u8]) -> Self {
         Self { buf }
     }
 }
 
+/// File system object in CPIO file.
+pub struct Object<'a> {
+    /// The file metadata.
+    pub metadata: Metadata,
+    /// The full pathname.
+    pub name: &'a str,
+    /// The file data.
+    pub data: &'a [u8],
+}
+
 impl<'a> Iterator for CpioNewcReader<'a> {
-    type Item = Result<(Metadata, &'a str, &'a [u8]), ReadError>;
+    type Item = Result<Object<'a>, ReadError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         // SAFETY: To workaround lifetime
         let s: &'a mut Self = unsafe { core::mem::transmute(self) };
         match inner(&mut s.buf) {
-            Ok((_, "TRAILER!!!", _)) => None,
+            Ok(Object {
+                name: "TRAILER!!!", ..
+            }) => None,
             res => Some(res),
         }
     }
 }
 
-fn inner<'a>(buf: &'a mut &'a [u8]) -> Result<(Metadata, &'a str, &'a [u8]), ReadError> {
+fn inner<'a>(buf: &'a mut &'a [u8]) -> Result<Object<'a>, ReadError> {
     const HEADER_LEN: usize = 110;
     const MAGIC_NUMBER: &[u8] = b"070701";
 
@@ -71,7 +96,11 @@ fn inner<'a>(buf: &'a mut &'a [u8]) -> Result<(Metadata, &'a str, &'a [u8]), Rea
     let data = buf.read_bytes(file_size as usize)?;
     buf.read_bytes(pad_to_4(file_size as usize))?;
 
-    Ok((metadata, name, data))
+    Ok(Object {
+        metadata,
+        name,
+        data,
+    })
 }
 
 trait BufExt<'a> {
@@ -106,6 +135,7 @@ fn pad_to_4(len: usize) -> usize {
     }
 }
 
+/// The error type which is returned from CPIO reader.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ReadError {
     InvalidASCII,
@@ -114,6 +144,7 @@ pub enum ReadError {
     BufTooShort,
 }
 
+/// The file metadata.
 #[derive(Debug)]
 pub struct Metadata {
     pub ino: u32,
